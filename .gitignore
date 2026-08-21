@@ -1,0 +1,53 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment / secrets
+.env
+*.env.local
+
+# Uploads / temp files
+backend/uploads/
+uploads/
+*.log
+*.tmp
+
+# Trained model weights (large binary files)
+trained_models/*.pkl
+trained_models/*.pt
+trained_models/*.pth
+trained_models/*.h5
+
+# Datasets (large; document source in README instead)
+datasets/image/train/
+datasets/image/validation/
+datasets/image/test/
+datasets/video/train/
+datasets/video/test/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/

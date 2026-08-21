@@ -1,0 +1,46 @@
+# ── Core API framework ─────────────────────────────────────────────────────────
+# NOTE: Tested with Python 3.13
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.7.1
+pydantic-settings>=2.2.1
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.1.0
+
+# ── Database ───────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.30
+# psycopg2-binary        # PostgreSQL only — install separately: pip install psycopg2-binary
+
+# ── HTTP / External APIs ───────────────────────────────────────────────────────
+httpx>=0.27.0
+requests>=2.31.0
+python-dotenv>=1.0.1
+
+# ── Machine Learning (Python 3.13 requires numpy 2.x) ─────────────────────────
+numpy>=2.0.0
+pandas>=2.2.0
+scikit-learn>=1.5.0
+xgboost>=2.1.0
+shap>=0.46.0
+joblib>=1.4.0
+
+# ── Deep Learning ─────────────────────────────────────────────────────────────
+# CPU build; for GPU see: https://pytorch.org/get-started/locally/
+torch>=2.3.0
+torchvision>=0.18.0
+
+# ── Vision / Transformers ─────────────────────────────────────────────────────
+transformers>=4.41.0
+timm>=1.0.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+evaluate>=0.4.0
+datasets>=2.18.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tldextract>=5.1.0
+validators>=0.28.0
