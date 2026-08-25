@@ -17,6 +17,7 @@ False Positive Protection:
 import io
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,8 +45,15 @@ _feature_load_error: Optional[str] = None
 
 def _init_feature_model() -> None:
     global _feature_model, _feature_load_error
+    if _feature_model is not None or _feature_load_error is not None:
+        return
     if not _TORCH_AVAILABLE:
         _feature_load_error = "PyTorch not installed"
+        return
+    enable_deep = os.getenv("ENABLE_DEEP_FEATURE_MODEL", "false").lower() == "true"
+    if not enable_deep:
+        _feature_load_error = "Deep feature model disabled to save RAM"
+        logger.info("[MediaForensicsAnalyzer] Deep feature PyTorch model disabled (ENABLE_DEEP_FEATURE_MODEL=false)")
         return
     try:
         import torchvision.models as tvm
@@ -53,11 +61,11 @@ def _init_feature_model() -> None:
         m.classifier = torch.nn.Identity()
         m.to(DEVICE).eval()
         _feature_model = m
+        logger.info("[MediaForensicsAnalyzer] EfficientNet-B0 feature extractor initialized")
+        print("[MediaForensicsAnalyzer] EfficientNet-B0 feature extractor initialized")
     except Exception as exc:
         _feature_load_error = str(exc)
-
-
-_init_feature_model()
+        logger.warning("[MediaForensicsAnalyzer] Could not load EfficientNet feature extractor: %s", exc)
 
 
 class MediaForensicsAnalyzer:
@@ -218,7 +226,8 @@ class MediaForensicsAnalyzer:
 
     @staticmethod
     def compute_deep_features(pil_img: Image.Image) -> Tuple[float, bool]:
-        """Extract deep features using EfficientNet-B0 feature extractor."""
+        """Extract deep features using EfficientNet-B0 feature extractor (lazy loaded)."""
+        _init_feature_model()
         if _feature_model is None or not _TORCH_AVAILABLE:
             return 0.5, False
         try:
