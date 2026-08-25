@@ -29,7 +29,9 @@ def _smtp_ready() -> bool:
     host = os.getenv("SMTP_HOST", "").strip()
     user = os.getenv("SMTP_USERNAME", "").strip()
     pwd  = os.getenv("SMTP_PASSWORD", "").strip()
-    return bool(host) and user not in _PLACEHOLDER and pwd not in _PLACEHOLDER
+    ready = bool(host) and user not in _PLACEHOLDER and pwd not in _PLACEHOLDER
+    print(f"[EMAIL] _smtp_ready check: host='{host}', user='{user}', pwd_len={len(pwd)}, ready={ready}")
+    return ready
 
 
 def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> None:
@@ -39,7 +41,9 @@ def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> 
     Falls back to printing the URL in the backend console if SMTP is not
     configured, rather than silently failing.
     """
+    print(f"[EMAIL] send_password_reset_email called: to={to_email}, url={reset_url}")
     if not _smtp_ready():
+        print(f"[EMAIL] SMTP NOT READY — falling back to console")
         _print_dev_fallback(to_email, reset_url)
         return
 

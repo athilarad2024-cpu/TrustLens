@@ -288,10 +288,14 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Ses
 
     reset_url = f"{frontend_base}/reset-password?token={raw_token}"
 
+    print(f"[AUTH] Forgot-password: email={email}, user_found=True, reset_url={reset_url}")
+
     try:
         send_password_reset_email(to_email=user.email, reset_url=reset_url, user_name=user.name)
-    except Exception:
+        print(f"[AUTH] Password reset email function completed for {email}")
+    except Exception as exc:
         # Log the error but return generic success — avoids leaking SMTP config issues
+        print(f"[AUTH] ERROR: Reset email delivery failed for {email}: {exc}")
         logger.exception("Reset email delivery failed for %s", email)
 
     return MessageResponse(message=_GENERIC_MESSAGE)
