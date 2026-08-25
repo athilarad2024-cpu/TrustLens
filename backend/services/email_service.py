@@ -143,6 +143,9 @@ def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> 
     msg.attach(MIMEText(plain_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body,  "html",  "utf-8"))
 
+    sent = False
+    errors = []
+
     # Attempt Strategy 0: HTTP API Email Providers (Resend, Brevo, SendGrid) via Port 443
     # Render free tier blocks outbound TCP ports 587/465, but HTTP API on Port 443 works 100%!
     
