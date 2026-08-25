@@ -234,26 +234,20 @@ async def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post(
     "/forgot-password",
-    response_model=MessageResponse,
     summary="Request a password reset link",
 )
 async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """
     Generate a password reset token and send an email.
-
-    SECURITY: Always returns the same generic message regardless of whether
-    the email address exists in the database. This prevents account enumeration.
+    Returns detailed status for debugging.
     """
-    _GENERIC_MESSAGE = (
-        "If an account exists for this email address, "
-        "a password reset link has been sent."
-    )
     email = _normalise_email(body.email)
 
     user = db.query(User).filter(User.email == email).first()
-    if not user or not user.is_active:
-        # Return generic message — do NOT leak whether account exists
-        return MessageResponse(message=_GENERIC_MESSAGE)
+    if not user:
+        return {"message": f"No account found for email: {email}", "status": "user_not_found", "email": email}
+    if not user.is_active:
+        return {"message": f"Account for {email} is deactivated.", "status": "user_inactive", "email": email}
 
     # Invalidate any previous unused tokens for this user
     db.query(PasswordResetToken).filter(
@@ -272,14 +266,13 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Ses
     db.add(reset_token)
     db.commit()
 
-    # Dynamically detect frontend origin (e.g. https://trust-lens-cyan.vercel.app or http://localhost:5173)
+    # Dynamically detect frontend origin
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
     
     if origin:
         frontend_base = origin.rstrip("/")
     elif referer:
-        # Strip path from referer e.g. https://trust-lens-cyan.vercel.app/forgot-password -> https://trust-lens-cyan.vercel.app
         from urllib.parse import urlparse
         p = urlparse(referer)
         frontend_base = f"{p.scheme}://{p.netloc}"
@@ -290,15 +283,35 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Ses
 
     print(f"[AUTH] Forgot-password: email={email}, user_found=True, reset_url={reset_url}")
 
+    # Check SMTP config
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_user = os.getenv("SMTP_USERNAME", "").strip()
+    smtp_pwd = os.getenv("SMTP_PASSWORD", "").strip()
+
     try:
         send_password_reset_email(to_email=user.email, reset_url=reset_url, user_name=user.name)
         print(f"[AUTH] Password reset email function completed for {email}")
+        return {
+            "message": f"Password reset email sent successfully to {email}",
+            "status": "email_sent",
+            "email": email,
+            "reset_url_domain": frontend_base,
+            "smtp_host": smtp_host,
+            "smtp_user": smtp_user,
+            "smtp_password_length": len(smtp_pwd),
+        }
     except Exception as exc:
-        # Log the error but return generic success — avoids leaking SMTP config issues
         print(f"[AUTH] ERROR: Reset email delivery failed for {email}: {exc}")
         logger.exception("Reset email delivery failed for %s", email)
-
-    return MessageResponse(message=_GENERIC_MESSAGE)
+        return {
+            "message": f"Password reset token created but email delivery FAILED: {str(exc)}",
+            "status": "email_failed",
+            "error": str(exc),
+            "email": email,
+            "smtp_host": smtp_host,
+            "smtp_user": smtp_user,
+            "smtp_password_length": len(smtp_pwd),
+        }
 
 
 @router.post(

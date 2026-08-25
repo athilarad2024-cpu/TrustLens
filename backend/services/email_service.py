@@ -169,8 +169,11 @@ def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> 
     if sent:
         print(f"SUCCESS: Password reset email delivered to {to_email}")
     else:
-        logger.error("Failed to send reset email: %s", "; ".join(errors))
+        error_msg = "; ".join(errors)
+        print(f"FAILED: Could not send email to {to_email}: {error_msg}")
+        logger.error("Failed to send reset email: %s", error_msg)
         _print_dev_fallback(to_email, reset_url)
+        raise RuntimeError(f"SMTP delivery failed: {error_msg}")
 
 
 def _print_dev_fallback(to_email: str, reset_url: str) -> None:
