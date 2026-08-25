@@ -25,12 +25,18 @@ _PLACEHOLDER = {"your-gmail@gmail.com", "your-16-char-app-password", ""}
 
 
 def _smtp_ready() -> bool:
-    """Return True only when real SMTP credentials are present."""
+    """Return True when HTTP API key or SMTP credentials are present."""
+    resend = os.getenv("RESEND_API_KEY", "").strip()
+    brevo  = os.getenv("BREVO_API_KEY", os.getenv("SIB_API_KEY", "")).strip()
+    sendgrid = os.getenv("SENDGRID_API_KEY", "").strip()
     host = os.getenv("SMTP_HOST", "").strip()
     user = os.getenv("SMTP_USERNAME", "").strip()
     pwd  = os.getenv("SMTP_PASSWORD", "").strip()
-    ready = bool(host) and user not in _PLACEHOLDER and pwd not in _PLACEHOLDER
-    print(f"[EMAIL] _smtp_ready check: host='{host}', user='{user}', pwd_len={len(pwd)}, ready={ready}")
+    
+    has_http_api = bool(resend or brevo or sendgrid)
+    has_smtp = bool(host) and user not in _PLACEHOLDER and pwd not in _PLACEHOLDER
+    ready = has_http_api or has_smtp
+    print(f"[EMAIL] _smtp_ready check: http_api={has_http_api}, smtp={has_smtp}, ready={ready}")
     return ready
 
 
@@ -137,9 +143,98 @@ def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> 
     msg.attach(MIMEText(plain_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body,  "html",  "utf-8"))
 
-    # Attempt sending via 587 STARTTLS or 465 SSL
-    sent = False
-    errors = []
+    # Attempt Strategy 0: HTTP API Email Providers (Resend, Brevo, SendGrid) via Port 443
+    # Render free tier blocks outbound TCP ports 587/465, but HTTP API on Port 443 works 100%!
+    
+    # 0a. Resend (resend.com - 3000 free emails/mo)
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    if resend_api_key:
+        try:
+            import requests
+            res = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": os.getenv("RESEND_FROM_EMAIL", f"TrustAI <onboarding@resend.dev>"),
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": html_body,
+                    "text": plain_body
+                },
+                timeout=10
+            )
+            if res.status_code in (200, 201):
+                logger.info("Password reset email sent via Resend HTTP API (Port 443) to %s", to_email)
+                print(f"SUCCESS: Password reset email delivered via Resend HTTP API to {to_email}")
+                return
+            else:
+                errors.append(f"Resend HTTP API failed ({res.status_code}): {res.text}")
+        except Exception as exc:
+            errors.append(f"Resend HTTP API exception: {exc}")
+
+    # 0b. Brevo (brevo.com - 300 free emails/day)
+    brevo_api_key = os.getenv("BREVO_API_KEY", os.getenv("SIB_API_KEY", "")).strip()
+    if brevo_api_key:
+        try:
+            import requests
+            res = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": brevo_api_key,
+                    "Content-Type": "application/json",
+                    "accept": "application/json"
+                },
+                json={
+                    "sender": {"name": from_name, "email": from_addr},
+                    "to": [{"email": to_email, "name": user_name}],
+                    "subject": subject,
+                    "htmlContent": html_body,
+                    "textContent": plain_body
+                },
+                timeout=10
+            )
+            if res.status_code in (200, 201):
+                logger.info("Password reset email sent via Brevo HTTP API (Port 443) to %s", to_email)
+                print(f"SUCCESS: Password reset email delivered via Brevo HTTP API to {to_email}")
+                return
+            else:
+                errors.append(f"Brevo HTTP API failed ({res.status_code}): {res.text}")
+        except Exception as exc:
+            errors.append(f"Brevo HTTP API exception: {exc}")
+
+    # 0c. SendGrid HTTP API (sendgrid.com)
+    sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "").strip()
+    if sendgrid_api_key:
+        try:
+            import requests
+            res = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {sendgrid_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "personalizations": [{"to": [{"email": to_email}]}],
+                    "from": {"email": from_addr, "name": from_name},
+                    "subject": subject,
+                    "content": [
+                        {"type": "text/plain", "value": plain_body},
+                        {"type": "text/html", "value": html_body}
+                    ]
+                },
+                timeout=10
+            )
+            if res.status_code in (200, 202):
+                logger.info("Password reset email sent via SendGrid HTTP API (Port 443) to %s", to_email)
+                print(f"SUCCESS: Password reset email delivered via SendGrid HTTP API to {to_email}")
+                return
+            else:
+                errors.append(f"SendGrid HTTP API failed ({res.status_code}): {res.text}")
+        except Exception as exc:
+            errors.append(f"SendGrid HTTP API exception: {exc}")
 
     # Strategy 1: Port 587 with STARTTLS
     try:
@@ -173,7 +268,7 @@ def send_password_reset_email(to_email: str, reset_url: str, user_name: str) -> 
         print(f"FAILED: Could not send email to {to_email}: {error_msg}")
         logger.error("Failed to send reset email: %s", error_msg)
         _print_dev_fallback(to_email, reset_url)
-        raise RuntimeError(f"SMTP delivery failed: {error_msg}")
+        raise RuntimeError(f"Email delivery failed: {error_msg}. Note: Render free plan blocks SMTP ports 587/465; use RESEND_API_KEY, BREVO_API_KEY, or SENDGRID_API_KEY to send via HTTP API on Port 443.")
 
 
 def _print_dev_fallback(to_email: str, reset_url: str) -> None:
