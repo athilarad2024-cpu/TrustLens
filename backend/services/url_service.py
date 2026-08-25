@@ -264,13 +264,45 @@ async def analyze_url(url: str) -> Dict[str, Any]:
             _saved_count, _current_count, exc,
         )
 
+    # ── Gemini Semantic URL Analysis ──────────────────────────────────────────
+    from services.gemini_analyzer import GeminiUrlAnalyzer
+    gemini_result = GeminiUrlAnalyzer.analyze(url)
+    gemini_available = gemini_result.get("available", False)
+
+    gemini_reasons: List[str] = []
+    gemini_indicators: List[Dict] = []
+
+    if gemini_available:
+        gemini_prob = gemini_result["phishing_probability"]
+        gemini_reasons = gemini_result.get("reasons", [])
+        gemini_indicators = gemini_result.get("risk_indicators", [])
+        limitations.extend(gemini_result.get("limitations", []))
+
+        # Blend ML model with Gemini reasoning:
+        # If trusted domain matches verified whitelist, maintain low risk
+        if trusted_verdict.is_trusted and not gemini_result.get("classification") == "phishing":
+            final_prob = min(prob, gemini_prob)
+        else:
+            final_prob = 0.55 * gemini_prob + 0.45 * prob
+    else:
+        final_prob = prob
+        limitations.extend(gemini_result.get("limitations", []))
+
+    final_prob = float(np.clip(final_prob, 0.0, 0.99))
+    prediction = "phishing" if final_prob >= 0.5 else "benign"
+
     return {
         "model_available": True,
-        "phishing_probability": round(prob, 4),
+        "phishing_probability": round(final_prob, 4),
+        "ml_probability": round(prob, 4),
+        "gemini_probability": round(gemini_result.get("phishing_probability", 0.5), 4) if gemini_available else None,
+        "gemini_available": gemini_available,
+        "gemini_reasons": gemini_reasons,
+        "gemini_indicators": gemini_indicators,
         "prediction": prediction,
         "feature_values": features,
         "shap_values": shap_values,
-        "limitations": limitations,
+        "limitations": list(dict.fromkeys(limitations)),
         "redirect_info": redirect_info,
         "live_signals": {
             "domain_entropy": round(domain_entropy, 3),

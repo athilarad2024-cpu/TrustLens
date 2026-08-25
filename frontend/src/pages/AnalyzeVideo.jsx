@@ -7,11 +7,11 @@ import FileUpload from '../components/FileUpload';
 import { useToast } from '../context/ToastContext';
 
 const STAGES = [
-  { id: 'upload',  label: 'Uploading video',           desc: 'Transferring your file to the server', icon: Upload },
-  { id: 'sample',  label: 'Sampling frames',           desc: 'Extracting up to 40 key frames',       icon: Frame },
-  { id: 'analyze', label: 'Running deepfake model',    desc: 'EfficientNet-B0 per-frame inference',   icon: Cpu },
-  { id: 'score',   label: 'Computing Trust Score',     desc: 'Aggregating frame-level signals',       icon: BarChart2 },
-  { id: 'done',    label: 'Generating report',          desc: 'Building your evidence & explanation', icon: CheckCircle },
+  { id: 'upload',  label: 'Uploading video',              desc: 'Transferring file to analysis server',        icon: Upload },
+  { id: 'sample',  label: 'Representative Frame Sampling', desc: 'Extracting keyframes across video duration',  icon: Frame },
+  { id: 'analyze', label: 'Gemini Multimodal & Forensics', desc: 'Analyzing facial, visual & temporal flow',   icon: Cpu },
+  { id: 'score',   label: 'Computing Trust Score',        desc: 'Calibrating confidence & uncertainty range',  icon: BarChart2 },
+  { id: 'done',    label: 'Generating report',             desc: 'Building evidence & explanations',            icon: CheckCircle },
 ];
 
 function VideoAnalysisProgress({ stage, uploadPct }) {

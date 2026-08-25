@@ -20,6 +20,7 @@ function riskLabel(risk) {
     'medium':       'Medium Risk',
     'high':         'High Risk',
     'very-high':    'Very High Risk',
+    'safe':         'Verified Safe',
   };
   return map[risk] || risk;
 }
@@ -31,11 +32,24 @@ function badgeClass(risk) {
     'medium':       'badge-medium',
     'high':         'badge-high',
     'very-high':    'badge-very-high',
+    'safe':         'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40',
   };
   return (map[risk] || 'badge-medium') + ' px-3 py-1 rounded-full text-xs font-semibold';
 }
 
-export default function TrustScoreCard({ score, riskLevel, confidence, prediction }) {
+function classificationBadge(pred) {
+  if (!pred) return null;
+  const p = pred.toLowerCase().replace(/_/g, ' ');
+  if (p.includes('authentic') || p.includes('safe') || p.includes('benign')) {
+    return 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/30';
+  }
+  if (p.includes('uncertain') || p.includes('moderate') || p.includes('suspicious')) {
+    return 'bg-amber-900/40 text-amber-300 border border-amber-500/30';
+  }
+  return 'bg-rose-900/40 text-rose-300 border border-rose-500/30';
+}
+
+export default function TrustScoreCard({ score, riskLevel, confidence, prediction, aiProbability }) {
   const progressRef = useRef(null);
   const colors = scoreColor(score ?? 50);
   const dashOffset = CIRCUMFERENCE * (1 - (score ?? 0) / 100);
@@ -79,26 +93,47 @@ export default function TrustScoreCard({ score, riskLevel, confidence, predictio
         </div>
       </div>
 
-      {/* Risk badge */}
-      <div className="text-center space-y-3">
-        <span className={badgeClass(riskLevel)}>{riskLabel(riskLevel)}</span>
+      {/* Badges and classification */}
+      <div className="text-center space-y-3 w-full flex flex-col items-center">
+        <div className="flex items-center gap-2 flex-wrap justify-center">
+          <span className={badgeClass(riskLevel)}>{riskLabel(riskLevel)}</span>
+          {prediction && (
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${classificationBadge(prediction)}`}>
+              {prediction.replace(/_/g, ' ')}
+            </span>
+          )}
+        </div>
 
-        {prediction && (
-          <p className="text-slate-300 text-sm font-medium capitalize">
-            {prediction.replace(/_/g, ' ')}
-          </p>
-        )}
-
-        {confidence != null && (
-          <div className="w-48">
-            <div className="flex justify-between text-xs text-slate-500 mb-1">
-              <span>Confidence</span>
-              <span>{Math.round(confidence * 100)}%</span>
+        {/* AI Probability Bar (if present) */}
+        {aiProbability != null && (
+          <div className="w-52 pt-1">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>AI Probability</span>
+              <span className="font-mono font-semibold text-slate-200">{(aiProbability * 100).toFixed(1)}%</span>
             </div>
             <div className="h-1.5 bg-surface rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${Math.round(confidence * 100)}%`, background: colors.stroke }}
+                style={{
+                  width: `${Math.round(aiProbability * 100)}%`,
+                  background: aiProbability >= 0.7 ? '#ef4444' : aiProbability >= 0.3 ? '#f59e0b' : '#10b981',
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Confidence bar */}
+        {confidence != null && (
+          <div className="w-52">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Analysis Confidence</span>
+              <span className="font-mono text-slate-300">{Math.round(confidence * 100)}%</span>
+            </div>
+            <div className="h-1.5 bg-surface rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700 bg-primary-500"
+                style={{ width: `${Math.round(confidence * 100)}%` }}
               />
             </div>
           </div>
@@ -107,7 +142,7 @@ export default function TrustScoreCard({ score, riskLevel, confidence, predictio
 
       {/* Disclaimer */}
       <p className="text-center text-slate-500 text-xs max-w-xs leading-relaxed">
-        Trust Score is a probabilistic risk estimate, not a guarantee of authenticity.
+        Decision-support tool, not an absolute truth oracle.
       </p>
     </div>
   );

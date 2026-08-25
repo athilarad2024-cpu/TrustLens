@@ -22,11 +22,11 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
+import bcrypt
 from jose import JWTError, jwt
-from passlib.hash import bcrypt as pw_bcrypt
 
 from database.database import get_db
 from database.models import PasswordResetToken, User
@@ -42,7 +42,7 @@ SECRET_KEY: str = os.getenv("SECRET_KEY", "changeme_generate_a_real_secret")
 ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 PASSWORD_RESET_EXPIRE_MINUTES: int = int(os.getenv("PASSWORD_RESET_EXPIRE_MINUTES", "30"))
-FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+DEFAULT_FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://trust-lens-cyan.vercel.app")
 
 # Minimum password policy
 _MIN_PASSWORD_LEN = 8
@@ -51,12 +51,14 @@ _MIN_PASSWORD_LEN = 8
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _hash_password(plain: str) -> str:
-    return pw_bcrypt.hash(plain)
+    pwd_bytes = plain.encode("utf-8")
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
     try:
-        return pw_bcrypt.verify(plain, hashed)
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
     except Exception:
         return False
 
@@ -235,7 +237,7 @@ async def login(body: LoginRequest, db: Session = Depends(get_db)):
     response_model=MessageResponse,
     summary="Request a password reset link",
 )
-async def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """
     Generate a password reset token and send an email.
 
@@ -270,7 +272,21 @@ async def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get
     db.add(reset_token)
     db.commit()
 
-    reset_url = f"{FRONTEND_URL}/reset-password?token={raw_token}"
+    # Dynamically detect frontend origin (e.g. https://trust-lens-cyan.vercel.app or http://localhost:5173)
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    
+    if origin:
+        frontend_base = origin.rstrip("/")
+    elif referer:
+        # Strip path from referer e.g. https://trust-lens-cyan.vercel.app/forgot-password -> https://trust-lens-cyan.vercel.app
+        from urllib.parse import urlparse
+        p = urlparse(referer)
+        frontend_base = f"{p.scheme}://{p.netloc}"
+    else:
+        frontend_base = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND_URL).rstrip("/")
+
+    reset_url = f"{frontend_base}/reset-password?token={raw_token}"
 
     try:
         send_password_reset_email(to_email=user.email, reset_url=reset_url, user_name=user.name)

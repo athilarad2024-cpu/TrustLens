@@ -373,41 +373,54 @@ def compute_url_trust_score(
     }
 
 
+# ── Classification thresholds ────────────────────────────────────────────────
+THRESHOLD_AUTHENTIC = 0.30
+THRESHOLD_AI_GENERATED = 0.70
+
+
+def probability_to_classification(prob: float, media_type: str = "image") -> str:
+    """
+    Map AI probability to standard classification labels with strong uncertainty band.
+    0.00 - 0.30 -> likely_authentic
+    0.30 - 0.70 -> uncertain (e.g. 52.8% is strictly uncertain)
+    0.70 - 1.00 -> likely_ai_generated
+    """
+    if prob is None:
+        return "uncertain"
+    if prob >= THRESHOLD_AI_GENERATED:
+        return "likely_ai_generated"
+    if prob <= THRESHOLD_AUTHENTIC:
+        return "likely_authentic"
+    return "uncertain"
+
+
 # ── Image Trust Score ─────────────────────────────────────────────────────────
 
 def compute_image_trust_score(image_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Compute trust score for an image analysis."""
+    """
+    Compute trust score and risk level for an image analysis.
+    Unified calibration between Gemini vision analysis and local forensics.
+    """
     limitations = list(image_result.get("limitations", []))
 
-    prob       = image_result.get("ai_generated_probability")
-    confidence = image_result.get("confidence")
-
+    prob = image_result.get("ai_probability")
     if prob is None:
-        limitations.append("Image model unavailable; trust score based on technical signals only.")
-        model_risk = 0.4
-        conf = 0.35
-    else:
-        model_risk = float(prob)
-        conf = float(confidence or 0.6)
+        prob = image_result.get("ai_generated_probability", 0.5)
 
-    # ── Forensic signals component (15%) ──────────────────────────────────────
-    signals      = image_result.get("technical_signals", {})
-    forensic_risk = _image_forensic_risk(signals, limitations)
+    confidence = image_result.get("confidence", 0.6)
 
-    # ── Model reliability component (20%) ────────────────────────────────────
-    reliability_risk = 1.0 - conf
+    # Score: 100 is maximum authentic trust, 0 is maximum AI risk
+    raw_trust = (1.0 - float(prob)) * 100.0
+    trust_score = int(round(max(0.0, min(100.0, raw_trust))))
 
-    weighted_risk = (
-        IMAGE_WEIGHTS["synthetic_model"]   * model_risk +
-        IMAGE_WEIGHTS["forensic_signals"]  * forensic_risk +
-        IMAGE_WEIGHTS["model_reliability"] * reliability_risk
-    )
+    classification = image_result.get("classification") or probability_to_classification(prob, "image")
 
-    score = int(round((1.0 - max(0.0, min(1.0, weighted_risk))) * 100))
     return {
-        "trust_score": score,
-        "risk_level":  score_to_risk(score),
-        "confidence":  round(conf, 3),
+        "trust_score": trust_score,
+        "risk_level": score_to_risk(trust_score),
+        "classification": classification,
+        "ai_probability": round(float(prob), 4),
+        "confidence": round(float(confidence), 3),
         "limitations": limitations,
     }
 
@@ -415,44 +428,53 @@ def compute_image_trust_score(image_result: Dict[str, Any]) -> Dict[str, Any]:
 # ── Video Trust Score ─────────────────────────────────────────────────────────
 
 def compute_video_trust_score(video_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Compute trust score for a video analysis."""
+    """
+    Compute trust score and risk level for a video analysis.
+    Fuses frame-level AI probability and temporal consistency score.
+    """
     limitations = list(video_result.get("limitations", []))
 
-    deepfake_prob = video_result.get("deepfake_probability")
-    sfr           = video_result.get("suspicious_frame_ratio")
-    confidence    = video_result.get("confidence")
+    prob = video_result.get("ai_probability")
+    if prob is None:
+        prob = video_result.get("deepfake_probability", 0.5)
 
-    if deepfake_prob is None:
-        limitations.append("Deepfake model unavailable; trust score based on available signals only.")
-        model_risk = 0.4
-        sfr_risk   = 0.4
-        conf       = 0.3
-    else:
-        model_risk = float(deepfake_prob)
-        sfr_risk   = float(sfr) if sfr is not None else 0.4
-        conf       = float(confidence or 0.5)
+    temporal_score = video_result.get("temporal_consistency_score", 0.7)
+    confidence = video_result.get("confidence", 0.6)
 
-    # ── Technical signals (15%) ───────────────────────────────────────────────
-    tech_signals  = video_result.get("technical_signals", {})
-    tech_risk     = _video_technical_risk(tech_signals)
+    # Trust Score blends authentic probability (75%) and temporal stability (25%)
+    raw_trust = ((1.0 - float(prob)) * 0.75 + float(temporal_score) * 0.25) * 100.0
+    trust_score = int(round(max(0.0, min(100.0, raw_trust))))
 
-    # ── Reliability (15%) ─────────────────────────────────────────────────────
-    reliability_risk = 1.0 - conf
+    classification = video_result.get("classification") or probability_to_classification(prob, "video")
 
-    weighted_risk = (
-        VIDEO_WEIGHTS["deepfake_model"]         * model_risk +
-        VIDEO_WEIGHTS["suspicious_frame_ratio"] * sfr_risk +
-        VIDEO_WEIGHTS["technical_signals"]      * tech_risk +
-        VIDEO_WEIGHTS["reliability"]            * reliability_risk
-    )
-
-    score = int(round((1.0 - max(0.0, min(1.0, weighted_risk))) * 100))
     return {
-        "trust_score": score,
-        "risk_level":  score_to_risk(score),
-        "confidence":  round(conf, 3),
+        "trust_score": trust_score,
+        "risk_level": score_to_risk(trust_score),
+        "classification": classification,
+        "ai_probability": round(float(prob), 4),
+        "confidence": round(float(confidence), 3),
+        "temporal_consistency_score": round(float(temporal_score), 4),
         "limitations": limitations,
     }
+
+
+# ── TrustScoreService Wrapper Class ──────────────────────────────────────────
+
+class TrustScoreService:
+    """
+    Unified Trust Score Calculation Service.
+    """
+    @staticmethod
+    def calculate_image_trust(image_result: Dict[str, Any]) -> Dict[str, Any]:
+        return compute_image_trust_score(image_result)
+
+    @staticmethod
+    def calculate_video_trust(video_result: Dict[str, Any]) -> Dict[str, Any]:
+        return compute_video_trust_score(video_result)
+
+    @staticmethod
+    def calculate_url_trust(url_result: Dict[str, Any], security_result: Dict[str, Any]) -> Dict[str, Any]:
+        return compute_url_trust_score(url_result, security_result)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

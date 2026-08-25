@@ -1,10 +1,10 @@
-// pages/Results.jsx — enhanced with collapsible sections, share, and analyze-another
+// pages/Results.jsx — Enhanced with Gemini Multimodal AI & Forensics Visualizations
 import { useState, useCallback } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Download, ExternalLink, Frame, BarChart2,
   Shield, AlertTriangle, CheckCircle, Info, ChevronDown,
-  Share2, Plus, Copy, Check
+  Share2, Plus, Check, Sparkles, Eye, Film, Layers, HelpCircle
 } from 'lucide-react';
 import TrustScoreCard from '../components/TrustScoreCard';
 import EvidenceList from '../components/EvidenceList';
@@ -23,7 +23,7 @@ function MetaRow({ label, value, mono }) {
   );
 }
 
-function CollapsibleSection({ title, icon: Icon, defaultOpen = true, children }) {
+function CollapsibleSection({ title, icon: Icon, defaultOpen = true, badge, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="card-glass overflow-hidden animate-slide-up">
@@ -31,9 +31,14 @@ function CollapsibleSection({ title, icon: Icon, defaultOpen = true, children })
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <Icon size={18} className="text-primary-400" />
           <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
+          {badge && (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary-900/60 text-primary-300 border border-primary-500/30">
+              {badge}
+            </span>
+          )}
         </div>
         <ChevronDown
           size={16}
@@ -45,6 +50,94 @@ function CollapsibleSection({ title, icon: Icon, defaultOpen = true, children })
           {children}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReasonsPanel({ reasons }) {
+  if (!reasons || !reasons.length) return null;
+  return (
+    <div className="space-y-2.5">
+      {reasons.map((reason, idx) => (
+        <div key={idx} className="flex items-start gap-3 bg-surface/60 border border-surface-border rounded-xl px-4 py-3">
+          <div className="w-5 h-5 rounded-full bg-primary-500/20 text-primary-400 flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-bold">
+            {idx + 1}
+          </div>
+          <p className="text-slate-300 text-sm leading-relaxed">{reason}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VisualSignalsPanel({ signals }) {
+  if (!signals || !signals.length) return null;
+
+  const assessmentBadge = (assess) => {
+    if (assess === 'synthetic') {
+      return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-900/40 text-rose-300 border border-rose-500/30">Synthetic</span>;
+    }
+    if (assess === 'natural') {
+      return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-500/30">Natural</span>;
+    }
+    return <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-900/40 text-amber-300 border border-amber-500/30">Inconclusive</span>;
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {signals.map((sig, idx) => (
+        <div key={idx} className="bg-surface/50 border border-surface-border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
+              {sig.feature || 'Visual Feature'}
+            </span>
+            {assessmentBadge(sig.assessment)}
+          </div>
+          <p className="text-slate-300 text-sm">{sig.observation}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TemporalSignalsPanel({ signals, consistencyScore }) {
+  return (
+    <div className="space-y-4">
+      {consistencyScore != null && (
+        <div className="flex items-center justify-between p-4 bg-primary-950/40 border border-primary-500/20 rounded-xl">
+          <div>
+            <p className="text-sm font-semibold text-primary-200">Temporal Consistency Index</p>
+            <p className="text-xs text-slate-400 mt-0.5">Smoothness and identity stability across video duration</p>
+          </div>
+          <div className="text-right">
+            <span className="text-2xl font-bold text-primary-300 font-mono">
+              {(consistencyScore * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+      )}
+
+      {signals && signals.length > 0 && (
+        <div className="space-y-2">
+          {signals.map((sig, idx) => (
+            <div key={idx} className="flex items-start justify-between gap-3 p-3.5 bg-surface/50 border border-surface-border rounded-xl">
+              <div className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
+                  {sig.signal || 'Temporal Observation'}
+                </span>
+                <p className="text-slate-300 text-sm">{sig.observation}</p>
+              </div>
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 ${
+                sig.is_suspicious
+                  ? 'bg-rose-900/40 text-rose-300 border border-rose-500/30'
+                  : 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                {sig.is_suspicious ? 'Warping/Jitter' : 'Stable'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -89,13 +182,13 @@ function ExternalIntelPanel({ ext }) {
 
 function FeatureTable({ features }) {
   if (!features || !Object.keys(features).length) return null;
-  const entries = Object.entries(features).filter(([, v]) => typeof v === 'number');
+  const entries = Object.entries(features).filter(([, v]) => typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean');
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left border-b border-surface-border">
-            <th className="pb-2 text-slate-400 font-medium">Feature</th>
+            <th className="pb-2 text-slate-400 font-medium">Metric / Feature</th>
             <th className="pb-2 text-slate-400 font-medium text-right">Value</th>
           </tr>
         </thead>
@@ -103,7 +196,9 @@ function FeatureTable({ features }) {
           {entries.map(([k, v]) => (
             <tr key={k} className="border-b border-surface-border/50 last:border-0">
               <td className="py-1.5 text-slate-400 font-mono text-xs">{k}</td>
-              <td className="py-1.5 text-slate-200 text-right font-mono">{Number(v).toFixed(2)}</td>
+              <td className="py-1.5 text-slate-200 text-right font-mono">
+                {typeof v === 'number' ? Number(v).toFixed(3) : String(v)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -117,7 +212,7 @@ function ShareButton({ result }) {
   const toast = useToast();
 
   const handleShare = useCallback(async () => {
-    const summary = `TrustAI Analysis Result\nType: ${result.type}\nTrust Score: ${result.trust_score}/100\nRisk Level: ${result.risk_level}\nPrediction: ${result.prediction}\nID: ${result.analysis_id}`;
+    const summary = `TrustAI Analysis Result\nType: ${result.type}\nTrust Score: ${result.trust_score}/100\nClassification: ${result.classification || result.prediction}\nConfidence: ${Math.round((result.confidence || 0.6) * 100)}%\nID: ${result.analysis_id}`;
     try {
       await navigator.clipboard.writeText(summary);
       setCopied(true);
@@ -150,7 +245,7 @@ export default function Results() {
     );
   }
 
-  const typeLabel = { url: 'URL Analysis', image: 'Image Analysis', video: 'Video Analysis' };
+  const typeLabel = { url: 'URL Analysis', image: 'Image AI Analysis', video: 'Video Deepfake Analysis' };
   const analyzeAgainPath = { url: '/analyze/url', image: '/analyze/image', video: '/analyze/video' };
 
   const downloadJSON = () => {
@@ -161,6 +256,9 @@ export default function Results() {
     a.click();
   };
 
+  const aiProb = result.ai_probability ?? result.ai_generated_probability ?? result.deepfake_probability;
+  const classification = result.classification || result.prediction;
+
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-6 animate-fade-in">
       {/* Top bar */}
@@ -169,7 +267,14 @@ export default function Results() {
           <ArrowLeft size={15} /> Back
         </button>
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-white">{typeLabel[result.type] || 'Analysis Result'}</h1>
+          <div className="inline-flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-white">{typeLabel[result.type] || 'Analysis Result'}</h1>
+            {result.gemini_available && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-violet-900/50 text-violet-300 border border-violet-500/30">
+                <Sparkles size={11} /> Gemini 2.5 Vision
+              </span>
+            )}
+          </div>
           <p className="text-slate-500 text-xs mt-0.5 font-mono">{result.analysis_id}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -188,39 +293,40 @@ export default function Results() {
             score={result.trust_score}
             riskLevel={result.risk_level}
             confidence={result.confidence}
-            prediction={result.prediction}
+            prediction={classification}
+            aiProbability={aiProb}
           />
 
           {/* Quick meta */}
           <div className="card p-5 space-y-1">
-            <MetaRow label="Analysis ID"   value={result.analysis_id?.slice(0, 16) + '…'} mono />
-            <MetaRow label="Type"          value={result.type} />
-            <MetaRow label="Created"       value={result.created_at ? new Date(result.created_at).toLocaleString() : null} />
+            <MetaRow label="Classification" value={classification ? classification.replace(/_/g, ' ') : 'Uncertain'} />
+            {aiProb != null && (
+              <MetaRow label="AI-Generated Probability" value={`${(aiProb * 100).toFixed(1)}%`} />
+            )}
+            {result.confidence != null && (
+              <MetaRow label="Confidence" value={`${Math.round(result.confidence * 100)}%`} />
+            )}
+            <MetaRow label="Type" value={result.type} />
+            <MetaRow label="Created" value={result.created_at ? new Date(result.created_at).toLocaleString() : null} />
+
             {result.type === 'url' && <MetaRow label="URL" value={result.url} mono />}
             {result.type === 'url' && <MetaRow label="Security Status" value={result.security_status} />}
-            {result.type === 'url' && result.phishing_probability != null && (
-              <MetaRow label="Phishing Probability" value={`${(result.phishing_probability * 100).toFixed(1)}%`} />
-            )}
-            {result.type === 'image' && result.ai_generated_probability != null && (
-              <MetaRow label="AI-Generated Prob." value={`${(result.ai_generated_probability * 100).toFixed(1)}%`} />
-            )}
+
             {result.type === 'video' && (
               <>
-                <MetaRow label="Frames Analyzed"  value={result.frames_analyzed} />
-                <MetaRow label="Suspicious Frames" value={result.suspicious_frames} />
-                {result.suspicious_frame_ratio != null && (
-                  <MetaRow label="Suspicious Ratio" value={`${(result.suspicious_frame_ratio * 100).toFixed(1)}%`} />
-                )}
-                {result.deepfake_probability != null && (
-                  <MetaRow label="Deepfake Probability" value={`${(result.deepfake_probability * 100).toFixed(1)}%`} />
+                <MetaRow label="Frames Sampled" value={result.frames_analyzed} />
+                {result.temporal_consistency_score != null && (
+                  <MetaRow label="Temporal Consistency" value={`${(result.temporal_consistency_score * 100).toFixed(0)}%`} />
                 )}
               </>
             )}
-            {!result.model_available && (
-              <div className="flex items-center gap-2 text-amber-400 text-xs pt-2">
-                <AlertTriangle size={12} /> Model not trained yet
-              </div>
-            )}
+
+            <div className="pt-2 border-t border-surface-border flex items-center justify-between text-xs text-slate-400">
+              <span>Gemini Multimodal</span>
+              <span className={result.gemini_available ? "text-emerald-400 font-medium" : "text-slate-500"}>
+                {result.gemini_available ? "Active & Calibrated" : "Fallback (Local)"}
+              </span>
+            </div>
           </div>
 
           {/* Analyze Another */}
@@ -234,31 +340,53 @@ export default function Results() {
 
         {/* Right: Collapsible detail panels */}
         <div className="lg:col-span-2 space-y-4">
-          <CollapsibleSection title="Explanation" icon={Shield} defaultOpen={true}>
+          {/* Reasons Panel */}
+          {result.reasons && result.reasons.length > 0 && (
+            <CollapsibleSection title="Key Findings & Reasoning" icon={Sparkles} defaultOpen={true}>
+              <ReasonsPanel reasons={result.reasons} />
+            </CollapsibleSection>
+          )}
+
+          {/* Visual Signals Panel (for image/video) */}
+          {result.visual_signals && result.visual_signals.length > 0 && (
+            <CollapsibleSection title="Visual Signal Inspections" icon={Eye} defaultOpen={true} badge={`${result.visual_signals.length} checks`}>
+              <VisualSignalsPanel signals={result.visual_signals} />
+            </CollapsibleSection>
+          )}
+
+          {/* Temporal Signals Panel (for video) */}
+          {result.type === 'video' && (
+            <CollapsibleSection title="Temporal Consistency & Motion" icon={Film} defaultOpen={true}>
+              <TemporalSignalsPanel
+                signals={result.temporal_signals}
+                consistencyScore={result.temporal_consistency_score}
+              />
+            </CollapsibleSection>
+          )}
+
+          {/* Explanation Section */}
+          <CollapsibleSection title="Explanation & Summary" icon={Shield} defaultOpen={true}>
             <ExplanationSection
               explanation={result.explanation}
               limitations={result.limitations}
             />
           </CollapsibleSection>
 
-          <CollapsibleSection title="Evidence" icon={BarChart2} defaultOpen={true}>
+          {/* Evidence List */}
+          <CollapsibleSection title="Forensic & Multimodal Evidence" icon={BarChart2} defaultOpen={true} badge={`${result.evidence?.length || 0} items`}>
             <EvidenceList evidence={result.evidence} />
           </CollapsibleSection>
 
+          {/* External Intelligence (URL) */}
           {result.type === 'url' && result.external_intelligence && (
             <CollapsibleSection title="External Security Intelligence" icon={ExternalLink} defaultOpen={true}>
               <ExternalIntelPanel ext={result.external_intelligence} />
             </CollapsibleSection>
           )}
 
-          {result.type === 'url' && result.feature_values && (
-            <CollapsibleSection title="URL Feature Details" icon={BarChart2} defaultOpen={false}>
-              <FeatureTable features={result.feature_values} />
-            </CollapsibleSection>
-          )}
-
-          {result.type === 'video' && result.technical_signals && (
-            <CollapsibleSection title="Video Technical Signals" icon={Frame} defaultOpen={false}>
+          {/* Technical signals / features */}
+          {result.technical_signals && (
+            <CollapsibleSection title="Technical Signal Metrics" icon={Layers} defaultOpen={false}>
               <FeatureTable features={result.technical_signals} />
             </CollapsibleSection>
           )}

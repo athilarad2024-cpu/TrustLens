@@ -235,38 +235,41 @@ def generate_image_evidence(
     trust_score: int,
 ) -> Dict[str, Any]:
     evidence: List[Dict] = []
-    parts: List[str] = []
+    parts: List[str] = list(image_result.get("reasons", []))
     limitations: List[str] = list(image_result.get("limitations", []))
 
-    prob = image_result.get("ai_generated_probability")
+    prob = image_result.get("ai_probability")
+    if prob is None:
+        prob = image_result.get("ai_generated_probability")
     confidence = image_result.get("confidence")
+    classification = image_result.get("classification", "uncertain")
 
     if prob is not None:
-        if prob >= 0.65:
-            sev = "high"
-            parts.append(f"The forensic analysis assigned a high AI-generation probability ({prob:.0%}).")
-        elif prob >= 0.45:
-            sev = "medium"
-            parts.append(f"The forensic analysis found mixed signals, resulting in uncertain classification ({prob:.0%}).")
-        else:
-            sev = "low"
-            parts.append(f"The forensic analysis assigned a low AI-generated probability ({prob:.0%}), consistent with a real photograph.")
-        evidence.append(_evidence("image_model", f"AI-generated probability: {prob:.2%}", sev, f"{prob:.4f}"))
+        sev = "high" if prob >= 0.70 else "medium" if prob >= 0.30 else "low"
+        evidence.append(_evidence("image_ai_model", f"AI-generation probability: {prob:.2%}", sev, f"{prob:.4f}"))
         if confidence is not None:
             evidence.append(_evidence("model_confidence", f"Analysis confidence: {confidence:.2%}", "info", f"{confidence:.4f}"))
-    else:
-        evidence.append(_evidence("image_model", "Image model unavailable.", "info"))
-        limitations.append("Image model not loaded; only technical signals used.")
+
+    # Gemini Multimodal Evidence
+    if image_result.get("gemini_available"):
+        evidence.append(_evidence("gemini_multimodal_vision", "Gemini 2.5 multimodal visual inspection completed.", "info", "gemini=active"))
+
+    # Visual signals from Gemini
+    for sig in image_result.get("visual_signals", []):
+        feat = sig.get("feature", "Visual Feature")
+        obs = sig.get("observation", "")
+        assess = sig.get("assessment", "inconclusive")
+        sev = "high" if assess == "synthetic" else "low" if assess == "natural" else "medium"
+        evidence.append(_evidence(f"visual_{feat.lower().replace(' ', '_')}", f"{feat}: {obs}", sev, assess))
 
     # Technical / forensic signals
     signals = image_result.get("technical_signals", {})
     if signals:
-        fmt    = signals.get("format", "unknown")
-        w, h   = signals.get("width", 0), signals.get("height", 0)
+        fmt = signals.get("format", "unknown")
+        w, h = signals.get("width", 0), signals.get("height", 0)
         has_exif = bool(signals.get("has_exif", True))
         evidence.append(_evidence("technical_signals", f"Format: {fmt}, Size: {int(w)}x{int(h)}px", "info"))
 
-        # ELA signal
         ela = signals.get("ela_score")
         if ela is not None:
             ela_sev = "high" if ela > 0.6 else "medium" if ela > 0.35 else "low"
@@ -277,63 +280,36 @@ def generate_image_evidence(
                    else "ELA score is within normal range for authentic images."),
                 ela_sev, f"ela={ela:.4f}",
             ))
-            if ela > 0.4:
-                parts.append(f"ELA detected elevated re-compression artifacts (score={ela:.2f}), which can indicate AI generation or post-processing.")
 
-        # Frequency signal
         freq = signals.get("freq_score")
         if freq is not None:
             freq_sev = "high" if freq > 0.6 else "medium" if freq > 0.35 else "low"
             evidence.append(_evidence(
                 "frequency_analysis",
                 f"DCT frequency analysis score: {freq:.2f} — "
-                + ("abnormal frequency distribution detected, common in AI-generated images." if freq > 0.4
+                + ("abnormal frequency distribution detected." if freq > 0.4
                    else "frequency distribution is typical of real photographic content."),
                 freq_sev, f"freq={freq:.4f}",
             ))
-            if freq > 0.4:
-                parts.append(f"Frequency domain analysis shows abnormal high-frequency energy (score={freq:.2f}), a known signature of AI image decoders.")
 
-        # Noise signal
         noise = signals.get("noise_score")
         if noise is not None:
             noise_sev = "high" if noise > 0.6 else "medium" if noise > 0.35 else "low"
             evidence.append(_evidence(
                 "noise_analysis",
                 f"Noise pattern analysis score: {noise:.2f} — "
-                + ("irregular noise coefficient-of-variation suggests non-photographic origin." if noise > 0.4
+                + ("irregular noise pattern." if noise > 0.4
                    else "noise pattern is consistent with real camera sensor noise."),
                 noise_sev, f"noise={noise:.4f}",
             ))
 
-        # Deep feature signal
-        deep = signals.get("deep_score")
-        if deep is not None:
-            deep_sev = "high" if deep > 0.6 else "medium" if deep > 0.35 else "low"
-            evidence.append(_evidence(
-                "deep_features",
-                f"Neural feature analysis score: {deep:.2f} — "
-                + ("feature activation pattern is atypical of real photographs." if deep > 0.4
-                   else "feature activations are consistent with real photographic content."),
-                deep_sev, f"deep={deep:.4f}",
-            ))
-            if deep > 0.4:
-                parts.append(f"Pretrained neural network feature analysis detected anomalous activation patterns (score={deep:.2f}).")
-
-        # EXIF
         if not has_exif:
-            evidence.append(_evidence("technical_signals", "No EXIF metadata detected.", "low"))
-            parts.append("No EXIF metadata found. Note: this is common in shared/processed images and is not definitive evidence of manipulation.")
+            evidence.append(_evidence("technical_signals", "No EXIF metadata detected (normal on social media).", "low"))
 
-
-    prediction = image_result.get("prediction", "unknown")
     explanation = _build_explanation(
         _image_prediction_label(trust_score),
         parts,
-        limitations + [
-            "Model accuracy depends on training data. Novel generation methods may not be detected.",
-            "AI image detectors can produce false positives on heavily compressed or processed real photographs.",
-        ],
+        limitations,
         trust_score,
     )
 
@@ -341,15 +317,11 @@ def generate_image_evidence(
 
 
 def _image_prediction_label(score: int) -> str:
-    if score >= 80:
-        return "Low Risk — Likely Authentic"
-    if score >= 60:
-        return "Low-Moderate Risk — Possibly Authentic"
-    if score >= 40:
-        return "Medium Risk — Uncertain Authenticity"
-    if score >= 20:
-        return "High Risk — Likely AI-Generated or Manipulated"
-    return "Very High Risk — Strongly Indicates AI-Generated Content"
+    if score >= 70:
+        return "Likely Authentic Image"
+    if score <= 30:
+        return "Likely AI-Generated Image"
+    return "Uncertain / Mixed Signals"
 
 
 # ── Video Evidence & Explanation ──────────────────────────────────────────────
@@ -359,54 +331,63 @@ def generate_video_evidence(
     trust_score: int,
 ) -> Dict[str, Any]:
     evidence: List[Dict] = []
-    parts: List[str] = []
+    parts: List[str] = list(video_result.get("reasons", []))
     limitations: List[str] = list(video_result.get("limitations", []))
 
-    prob = video_result.get("deepfake_probability")
-    sfr = video_result.get("suspicious_frame_ratio")
+    prob = video_result.get("ai_probability")
+    if prob is None:
+        prob = video_result.get("deepfake_probability")
+    confidence = video_result.get("confidence")
+    temporal_score = video_result.get("temporal_consistency_score", 0.7)
     frames_analyzed = video_result.get("frames_analyzed", 0)
-    suspicious_frames = video_result.get("suspicious_frames", 0)
 
     if prob is not None:
-        if prob >= 0.75:
-            sev = "high"
-            parts.append(f"The deepfake frame classifier assigned a high manipulation probability ({prob:.0%}).")
-        elif prob >= 0.5:
-            sev = "medium"
-            parts.append(f"The deepfake classifier assigned a moderate probability of manipulation ({prob:.0%}).")
-        else:
-            sev = "low"
-            parts.append(f"The deepfake classifier assigned a low probability ({prob:.0%}), suggesting authentic content.")
-        evidence.append(_evidence("deepfake_model", f"Deepfake probability: {prob:.2%}", sev, f"{prob:.4f}"))
+        sev = "high" if prob >= 0.70 else "medium" if prob >= 0.30 else "low"
+        evidence.append(_evidence("video_ai_model", f"AI / Deepfake probability: {prob:.2%}", sev, f"{prob:.4f}"))
+        if confidence is not None:
+            evidence.append(_evidence("model_confidence", f"Analysis confidence: {confidence:.2%}", "info", f"{confidence:.4f}"))
 
-        if sfr is not None:
-            evidence.append(_evidence("frame_analysis",
-                f"{suspicious_frames} of {frames_analyzed} analyzed frames flagged as suspicious ({sfr:.0%}).",
-                "high" if sfr > 0.5 else ("medium" if sfr > 0.2 else "low"),
-                f"sfr={sfr:.4f}",
-            ))
-            if sfr > 0.5:
-                parts.append(f"More than half of analyzed frames ({sfr:.0%}) were flagged as suspicious.")
-    else:
-        evidence.append(_evidence("deepfake_model", "Deepfake model unavailable.", "info"))
+    evidence.append(_evidence(
+        "temporal_consistency",
+        f"Temporal consistency across {frames_analyzed} frames: {temporal_score:.2%} — "
+        + ("smooth inter-frame flow and identity stability." if temporal_score >= 0.7
+           else "detected boundary warping or inter-frame flickering."),
+        "low" if temporal_score >= 0.7 else "high" if temporal_score < 0.4 else "medium",
+        f"{temporal_score:.4f}",
+    ))
+
+    # Gemini Multimodal Evidence
+    if video_result.get("gemini_available"):
+        evidence.append(_evidence("gemini_video_analysis", f"Gemini 2.5 analyzed {frames_analyzed} representative video keyframes.", "info", "gemini=active"))
+
+    # Visual signals
+    for sig in video_result.get("visual_signals", []):
+        feat = sig.get("feature", "Visual Feature")
+        obs = sig.get("observation", "")
+        assess = sig.get("assessment", "inconclusive")
+        sev = "high" if assess == "synthetic" else "low" if assess == "natural" else "medium"
+        evidence.append(_evidence(f"visual_{feat.lower().replace(' ', '_')}", f"{feat}: {obs}", sev, assess))
+
+    # Temporal signals
+    for sig in video_result.get("temporal_signals", []):
+        name = sig.get("signal", "Temporal Signal")
+        obs = sig.get("observation", "")
+        susp = sig.get("is_suspicious", False)
+        evidence.append(_evidence(f"temporal_{name.lower().replace(' ', '_')}", f"{name}: {obs}", "high" if susp else "low", str(susp)))
 
     meta = video_result.get("technical_signals", {})
     if meta:
         evidence.append(_evidence("technical_signals",
             f"Video: {meta.get('width',0)}×{meta.get('height',0)}px, "
             f"{meta.get('fps',0):.1f}fps, {meta.get('duration_seconds',0):.1f}s, "
-            f"{meta.get('total_frames',0)} total frames",
+            f"{frames_analyzed} frames sampled throughout video",
             "info",
         ))
 
     explanation = _build_explanation(
         _video_prediction_label(trust_score),
         parts,
-        limitations + [
-            "Deepfake analysis requires clear, front-facing faces.",
-            "Analysis is based on sampled frames and may miss localized manipulation.",
-            "Novel deepfake methods not in training data may evade detection.",
-        ],
+        limitations,
         trust_score,
     )
 
@@ -414,15 +395,11 @@ def generate_video_evidence(
 
 
 def _video_prediction_label(score: int) -> str:
-    if score >= 80:
-        return "Low Risk — Likely Authentic Video"
-    if score >= 60:
-        return "Low-Moderate Risk — Possibly Authentic"
-    if score >= 40:
-        return "Medium Risk — Uncertain"
-    if score >= 20:
-        return "High Risk — Possible Deepfake"
-    return "Very High Risk — Likely Deepfake / Manipulated"
+    if score >= 70:
+        return "Likely Authentic Video"
+    if score <= 30:
+        return "Likely AI-Generated / Deepfake Video"
+    return "Uncertain / Mixed Video Signals"
 
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
@@ -433,13 +410,15 @@ def _build_explanation(
     limitations: List[str],
     trust_score: int,
 ) -> Dict[str, Any]:
+    # Deduplicate reason parts
+    dedup_parts = list(dict.fromkeys(reason_parts))
     return {
         "prediction_label": prediction_label,
         "trust_score": trust_score,
-        "reasons": reason_parts,
+        "reasons": dedup_parts if dedup_parts else ["Analysis completed based on available forensic and visual signals."],
         "limitations": [
-            *limitations,
-            "This system provides a probabilistic risk assessment. "
-            "It is not a guarantee of authenticity or manipulation.",
+            *list(dict.fromkeys(limitations)),
+            "TrustAI provides a decision-support risk assessment, not an absolute truth oracle.",
+            "Never claim media is 100% real or 100% AI-generated.",
         ],
     }
